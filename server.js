@@ -5,12 +5,12 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
 const mongoose = require("mongoose");
+const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
 dotenv.config();
 
-// Import modèles et routes
 const User = require("./models/User");
 const Review = require("./models/Review");
 const RefreshToken = require("./models/RefreshToken");
@@ -21,57 +21,40 @@ const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const isProduction = NODE_ENV === "production";
 
-// ===============================
-// 🔹 FRONTEND_ORIGIN
-// ===============================
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-  process.env.FRONTEND_ORIGIN, // pour prod (Vercel, Netlify, etc.)
-].filter(Boolean);
+// FRONTEND_ORIGIN doit être sans slash final
+const FRONTEND_ORIGIN =
+  process.env.FRONTEND_ORIGIN || "https://cinecritique-projet.vercel.app";
 
+// CORS
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.log("❌ Origin non autorisée :", origin);
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true, // important pour cookies
+    origin: isProduction ? FRONTEND_ORIGIN : "http://localhost:5173", // ⚠️ adapte au port Vite
+    credentials: true,
   })
 );
 
-// ===============================
-// 🔹 Middlewares
-// ===============================
+// Middleware
 app.use(express.json());
 app.use(cookieParser());
 
-// ===============================
-// 🔹 Static files (avatars/uploads)
-// ===============================
+// Static serving for uploaded files
 const uploadsRoot = path.join(__dirname, "uploads");
 const avatarsDir = path.join(uploadsRoot, "avatars");
 if (!fs.existsSync(uploadsRoot)) fs.mkdirSync(uploadsRoot);
 if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir);
 app.use("/uploads", express.static(uploadsRoot));
 
-// ===============================
-// 🔹 JWT Config
-// ===============================
-const JWT_ACCESS_SECRET =
-  process.env.JWT_ACCESS_SECRET || "dev_access_secret";
+// JWT config
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "dev_access_secret";
 const JWT_REFRESH_SECRET =
   process.env.JWT_REFRESH_SECRET || "dev_refresh_secret";
 const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
 
-// ===============================
-// 🔹 Helpers Tokens
-// ===============================
+// Routes
+app.use("/api", reviewRoutes);
+
+// --- Token helpers ---
 function signAccessToken(payload) {
   return jwt.sign(payload, JWT_ACCESS_SECRET, {
     expiresIn: ACCESS_TOKEN_EXPIRES_IN,
@@ -88,8 +71,9 @@ function setRefreshTokenCookie(res, refreshToken) {
   res.cookie("refreshToken", refreshToken, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7j
+    sameSite: isProduction ? "none" : "lax", // ⚠️ lax en local sinon bloque
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    domain: ".render.com", // si besoin
   });
 }
 
@@ -108,55 +92,116 @@ async function generateTokens(user) {
   });
   const refreshToken = signRefreshToken({ userId: user._id });
 
+  // Enregistrer en DB
   await RefreshToken.create({ userId: user._id, token: refreshToken });
 
   return { accessToken, refreshToken };
 }
 
-// ===============================
-// 🔹 Connexion MongoDB
-// ===============================
+// --- MongoDB ---
 mongoose
-  .connect(process.env.MONGO_URI, { dbName: "cinecritique" })
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Connecté à MongoDB Atlas"))
   .catch((err) => console.error("❌ Erreur MongoDB :", err));
 
-// ===============================
-// 🔹 Routes
-// ===============================
-app.use("/api", reviewRoutes);
+// --- Middleware d'authentification ---
+const authenticate = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: 'Token d\'accès manquant ou invalide' });
+    }
+    
+    const token = authHeader.split(' ')[1];
+    const payload = jwt.verify(token, JWT_ACCESS_SECRET);
+    
+    const user = await User.findById(payload.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    
+    req.user = user;
+    next();
+  } catch (err) {
+    console.error('Erreur d\'authentification :', err);
+    return res.status(401).json({ message: 'Session expirée ou invalide' });
+  }
+};
 
+// --- Routes ---
 app.get("/", (_req, res) =>
-  res.send("🎬 Bienvenue sur l'API CineCritique 🚀")
+  res.send("Bienvenue sur l'API CineCritique 🎬")
 );
 
-// --- Register
+// Get current user profile
+app.get("/api/profile", authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('-passwordHash');
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    res.status(200).json(user);
+  } catch (err) {
+    console.error('Erreur lors de la récupération du profil :', err);
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+});
+
+// Update user profile
+app.put("/api/profile", authenticate, async (req, res) => {
+  try {
+    const { username, bio } = req.body;
+    const updates = {};
+    
+    if (username !== undefined) updates.username = username;
+    if (bio !== undefined) updates.bio = bio;
+    
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('-passwordHash');
+    
+    res.status(200).json(user);
+  } catch (err) {
+    console.error('Erreur lors de la mise à jour du profil :', err);
+    res.status(500).json({ message: 'Erreur lors de la mise à jour du profil' });
+  }
+});
+
+// Register
 app.post("/api/auth/register", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password)
     return res.status(400).json({ message: "Email et mot de passe requis" });
 
   const normalizedEmail = email.toLowerCase().trim();
-  if (await User.findOne({ email: normalizedEmail }))
+  if (await User.findOne({ email: normalizedEmail })) {
     return res.status(409).json({ message: "Utilisateur déjà existant" });
+  }
 
   try {
     const passwordHash = await bcrypt.hash(password, 10);
-    const newUser = await User.create({ email: normalizedEmail, passwordHash });
+    const newUser = await User.create({
+      email: normalizedEmail,
+      passwordHash,
+    });
 
     const { accessToken, refreshToken } = await generateTokens(newUser);
+
     setRefreshTokenCookie(res, refreshToken);
 
-    res
-      .status(201)
-      .json({ user: { id: newUser._id, email: normalizedEmail }, accessToken });
+    res.status(201).json({
+      user: { id: newUser._id, email: normalizedEmail },
+      accessToken,
+    });
   } catch (err) {
-    console.error("❌ Erreur register :", err);
-    res.status(500).json({ message: "Erreur serveur" });
+    console.error("❌ Erreur lors de l'inscription :", err);
+    res.status(500).json({ message: "Erreur lors de l'inscription" });
   }
 });
 
-// --- Login
+// Login
 app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password)
@@ -167,17 +212,20 @@ app.post("/api/auth/login", async (req, res) => {
   if (!user) return res.status(401).json({ message: "Identifiants invalides" });
 
   const isValid = await bcrypt.compare(password, user.passwordHash);
-  if (!isValid) return res.status(401).json({ message: "Identifiants invalides" });
+  if (!isValid)
+    return res.status(401).json({ message: "Identifiants invalides" });
 
   const { accessToken, refreshToken } = await generateTokens(user);
+
   setRefreshTokenCookie(res, refreshToken);
 
-  res
-    .status(200)
-    .json({ user: { id: user._id, email: user.email }, accessToken });
+  res.status(200).json({
+    user: { id: user._id, email: user.email },
+    accessToken,
+  });
 });
 
-// --- Refresh
+// Refresh
 app.post("/api/auth/refresh", async (req, res) => {
   try {
     const { refreshToken } = req.cookies || {};
@@ -185,6 +233,7 @@ app.post("/api/auth/refresh", async (req, res) => {
       return res.status(401).json({ message: "Refresh token manquant" });
 
     const payload = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+
     const storedToken = await RefreshToken.findOne({
       token: refreshToken,
       userId: payload.userId,
@@ -193,33 +242,41 @@ app.post("/api/auth/refresh", async (req, res) => {
       return res.status(401).json({ message: "Refresh token invalide" });
 
     const user = await User.findById(payload.userId);
-    if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
+    if (!user)
+      return res.status(404).json({ message: "Utilisateur non trouvé" });
 
+    // Nouveau token
     const { accessToken, refreshToken: newRefreshToken } =
       await generateTokens(user);
-    await RefreshToken.deleteOne({ token: refreshToken });
-    setRefreshTokenCookie(res, newRefreshToken);
 
-    res
-      .status(200)
-      .json({ user: { id: user._id, email: user.email }, accessToken });
+    // Supprimer l'ancien (rotation des tokens)
+    await RefreshToken.deleteOne({ token: refreshToken });
+
+    setRefreshTokenCookie(res, newRefreshToken);
+    res.status(200).json({
+      user: { id: user._id, email: user.email },
+      accessToken,
+    });
+    console.log(req.cookies)
   } catch (err) {
-    console.error("❌ Refresh error:", err);
-    res.status(401).json({ message: "Refresh token invalide ou expiré" });
+    console.error(err);
+    return res
+      .status(401)
+      .json({ message: "Refresh token invalide ou expiré" });
   }
 });
 
-// --- Logout
+// Logout
 app.post("/api/auth/logout", async (req, res) => {
   const { refreshToken } = req.cookies || {};
-  if (refreshToken) await RefreshToken.deleteOne({ token: refreshToken });
+  if (refreshToken) {
+    await RefreshToken.deleteOne({ token: refreshToken });
+  }
   clearRefreshTokenCookie(res);
   res.status(200).json({ message: "Déconnecté" });
 });
 
-// ===============================
-// 🔹 Start Server
-// ===============================
+// Start
 app.listen(PORT, () =>
   console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`)
 );
