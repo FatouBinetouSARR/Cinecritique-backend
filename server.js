@@ -16,7 +16,7 @@
   const PORT = process.env.PORT || 3000;
   const NODE_ENV = process.env.NODE_ENV || "development";
   const isProduction = NODE_ENV === "production";
-  const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "https://cinecritique-projet.vercel.app/";
+  const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "https://cinecritique-projet.vercel.app";
 
   app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
   app.use(express.json());
