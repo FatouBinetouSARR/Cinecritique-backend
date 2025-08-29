@@ -73,6 +73,7 @@ function setRefreshTokenCookie(res, refreshToken) {
     secure: isProduction,
     sameSite: isProduction ? "none" : "lax", // ⚠️ lax en local sinon bloque
     maxAge: 7 * 24 * 60 * 60 * 1000,
+    domain: ".render.com", // si besoin
   });
 }
 
@@ -196,6 +197,7 @@ app.post("/api/auth/refresh", async (req, res) => {
       user: { id: user._id, email: user.email },
       accessToken,
     });
+    console.log(req.cookies)
   } catch (err) {
     console.error(err);
     return res
