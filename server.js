@@ -165,6 +165,7 @@ app.post("/api/auth/refresh", async (req, res) => {
     console.error("❌ Refresh error:", err);
     return res.status(401).json({ message: "Refresh token invalide ou expiré" });
   }
+  console.log(req.cookies)
 });
 
 // Logout
