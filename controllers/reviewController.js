@@ -117,6 +117,68 @@ async function getTopRatedMovies(req, res) {
 }
 
 module.exports = {
+  // Like/Unlike une critique
+  async toggleLikeReview(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const review = await Review.findById(id);
+      if (!review) {
+        return res.status(404).json({ message: 'Critique non trouvée' });
+      }
+
+      // Vérifier si l'utilisateur a déjà liké
+      const userIndex = review.likedBy.findIndex(id => id.toString() === userId.toString());
+      let isLiked;
+
+      if (userIndex === -1) {
+        // Ajouter le like
+        review.likedBy.push(userId);
+        review.likes += 1;
+        isLiked = true;
+      } else {
+        // Retirer le like
+        review.likedBy.splice(userIndex, 1);
+        review.likes = Math.max(0, review.likes - 1);
+        isLiked = false;
+      }
+
+      await review.save();
+      
+      res.json({ 
+        message: isLiked ? 'Critique likée avec succès' : 'Like retiré avec succès',
+        likes: review.likes,
+        isLiked
+      });
+    } catch (error) {
+      console.error('Erreur lors du like:', error);
+      res.status(500).json({ message: 'Erreur lors du traitement du like', error: error.message });
+    }
+  },
+
+  // Vérifier si l'utilisateur a liké une critique
+  async checkUserLike(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const review = await Review.findById(id);
+      if (!review) {
+        return res.status(404).json({ message: 'Critique non trouvée' });
+      }
+
+      const isLiked = review.likedBy.some(id => id.toString() === userId.toString());
+      res.json({ isLiked });
+    } catch (error) {
+      console.error('Erreur lors de la vérification du like:', error);
+      res.status(500).json({ 
+        message: 'Erreur lors de la vérification du like',
+        error: error.message 
+      });
+    }
+  },
+
   getReviewsByMovie,
   createReview,
   updateReview,

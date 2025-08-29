@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: cinecritique-backend
+    env: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: ACCESS_TOKEN_EXPIRES_IN
+        sync: false
+      - key: REFRESH_TOKEN_EXPIRES_IN
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
