@@ -1,0 +1,24 @@
+const express = require("express");
+const authenticate = require("../middlewares/authenticate.js");
+const {
+  getReviewsByMovie,
+  createReview,
+  updateReview,
+  deleteReview,
+  getMyReviews,
+} = require("../controllers/reviewController.js");
+
+const router = express.Router();
+
+// Film → toutes les critiques
+router.get("/movies/:movieId/reviews", getReviewsByMovie);
+
+// Actions utilisateur (protégées)
+router.post("/movies/:movieId/reviews", authenticate, createReview);
+router.put("/movies/:movieId/reviews/:id", authenticate, updateReview);
+router.delete("/movies/:movieId/reviews/:id", authenticate, deleteReview);
+
+// (optionnel) Mes critiques
+router.get("/reviews/mine", authenticate, getMyReviews);
+
+module.exports = router;
