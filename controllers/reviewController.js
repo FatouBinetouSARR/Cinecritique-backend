@@ -85,10 +85,42 @@ async function getMyReviews(req, res) {
   }
 }
 
+// GET /api/reviews/top-rated
+async function getTopRatedMovies(req, res) {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const minCount = parseInt(req.query.minCount, 10) || 1;
+
+    const results = await Review.aggregate([
+      {
+        $group: {
+          _id: "$movieId",
+          avgRating: { $avg: "$rating" },
+          reviewCount: { $sum: 1 },
+        },
+      },
+      { $match: { reviewCount: { $gte: minCount } } },
+      { $sort: { avgRating: -1, reviewCount: -1 } },
+      { $limit: limit },
+    ]);
+
+    const payload = results.map((r) => ({
+      movieId: r._id,
+      avgRating: Number(r.avgRating.toFixed(2)),
+      reviewCount: r.reviewCount,
+    }));
+
+    res.json(payload);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+}
+
 module.exports = {
   getReviewsByMovie,
   createReview,
   updateReview,
   deleteReview,
   getMyReviews,
+  getTopRatedMovies,
 };
