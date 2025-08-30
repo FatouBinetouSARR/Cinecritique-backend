@@ -1,5 +1,5 @@
 const express = require("express");
-const authenticate = require("../middlewares/authenticate.js");
+const authenticate = require("../middlewares/authenticate");
 const {
   getReviewsByMovie,
   createReview,
@@ -9,7 +9,9 @@ const {
   getTopRatedMovies,
   toggleLikeReview,
   checkUserLike,
-} = require("../controllers/reviewController.js");
+  getPopularReviews,
+  getTopCritics,
+} = require("../controllers/reviewController");
 
 const router = express.Router();
 
@@ -30,5 +32,9 @@ router.get("/reviews/top-rated", getTopRatedMovies);
 // Gestion des likes
 router.post("/reviews/:id/like", authenticate, toggleLikeReview);
 router.get("/reviews/:id/like", authenticate, checkUserLike);
+
+// Nouvelles routes pour la page d'accueil
+router.get("/reviews/popular", getPopularReviews);
+router.get("/users/top-critics", getTopCritics);
 
 module.exports = router;

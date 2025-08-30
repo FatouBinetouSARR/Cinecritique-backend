@@ -1,4 +1,4 @@
-const Review = require("../models/Review.js");
+const Review = require("../models/Review");
 
 // GET /api/movies/:movieId/reviews
 async function getReviewsByMovie(req, res) {
@@ -116,6 +116,63 @@ async function getTopRatedMovies(req, res) {
   }
 }
 
+// GET /api/reviews/popular - Récupérer les avis populaires triés par likes
+async function getPopularReviews(req, res) {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    
+    const reviews = await Review.find()
+      .populate("user", "username email")
+      .sort({ likes: -1 })
+      .limit(limit);
+    
+    res.json(reviews);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des avis populaires:', error);
+    res.status(500).json({ message: 'Erreur lors de la récupération des avis populaires' });
+  }
+}
+
+// GET /api/users/top-critics - Récupérer les critiqueurs populaires
+async function getTopCritics(req, res) {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 3, 10);
+    
+    const topCritics = await Review.aggregate([
+      {
+        $group: {
+          _id: "$user",
+          reviewCount: { $sum: 1 },
+          totalLikes: { $sum: "$likes" }
+        }
+      },
+      { $sort: { reviewCount: -1, totalLikes: -1 } },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "userInfo"
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          reviewCount: 1,
+          totalLikes: 1,
+          user: { $arrayElemAt: ["$userInfo", 0] }
+        }
+      }
+    ]);
+    
+    res.json(topCritics);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des critiqueurs populaires:', error);
+    res.status(500).json({ message: 'Erreur lors de la récupération des critiqueurs populaires' });
+  }
+}
+
 module.exports = {
   // Like/Unlike une critique
   async toggleLikeReview(req, res) {
@@ -185,4 +242,6 @@ module.exports = {
   deleteReview,
   getMyReviews,
   getTopRatedMovies,
+  getPopularReviews,
+  getTopCritics,
 };

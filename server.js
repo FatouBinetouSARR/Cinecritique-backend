@@ -15,7 +15,7 @@ dotenv.config();
 const User = require("./models/User");
 const Review = require("./models/Review");
 const RefreshToken = require("./models/RefreshToken");
-const reviewRoutes = require("./routes/reviewRoutes.js");
+const reviewRoutes = require("./routes/reviewRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,13 +23,12 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 const isProduction = NODE_ENV === "production";
 
 // ===============================
-// 🔹 FRONTEND_ORIGIN
+// 🔹 FRONTEND_ORIGIN / CORS
 // ===============================
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-  process.env.FRONTEND_ORIGIN, // pour prod (Vercel, Netlify, etc.)
-].filter(Boolean);
+const devOrigins = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"];
+const allowedOrigins = isProduction
+  ? [process.env.FRONTEND_ORIGIN].filter(Boolean) // Prod = une seule origine définie dans .env
+  : devOrigins; // Dev = plusieurs localhost
 
 app.use(
   cors({
@@ -41,7 +40,7 @@ app.use(
         callback(new Error("Not allowed by CORS"));
       }
     },
-    credentials: true, // important pour cookies
+    credentials: true, // nécessaire pour cookies (refresh token)
   })
 );
 
@@ -63,10 +62,8 @@ app.use("/uploads", express.static(uploadsRoot));
 // ===============================
 // 🔹 JWT Config
 // ===============================
-const JWT_ACCESS_SECRET =
-  process.env.JWT_ACCESS_SECRET || "dev_access_secret";
-const JWT_REFRESH_SECRET =
-  process.env.JWT_REFRESH_SECRET || "dev_refresh_secret";
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "dev_access_secret";
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev_refresh_secret";
 const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
 
@@ -74,15 +71,11 @@ const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
 // 🔹 Helpers Tokens
 // ===============================
 function signAccessToken(payload) {
-  return jwt.sign(payload, JWT_ACCESS_SECRET, {
-    expiresIn: ACCESS_TOKEN_EXPIRES_IN,
-  });
+  return jwt.sign(payload, JWT_ACCESS_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
 }
 
 function signRefreshToken(payload) {
-  return jwt.sign(payload, JWT_REFRESH_SECRET, {
-    expiresIn: REFRESH_TOKEN_EXPIRES_IN,
-  });
+  return jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
 }
 
 function setRefreshTokenCookie(res, refreshToken) {
@@ -90,7 +83,7 @@ function setRefreshTokenCookie(res, refreshToken) {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? "none" : "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7j
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
   });
 }
 
@@ -103,10 +96,7 @@ function clearRefreshTokenCookie(res) {
 }
 
 async function generateTokens(user) {
-  const accessToken = signAccessToken({
-    userId: user._id,
-    email: user.email,
-  });
+  const accessToken = signAccessToken({ userId: user._id, email: user.email });
   const refreshToken = signRefreshToken({ userId: user._id });
 
   await RefreshToken.create({ userId: user._id, token: refreshToken });
@@ -129,18 +119,14 @@ const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res
-        .status(401)
-        .json({ message: "Token d'accès manquant ou invalide" });
+      return res.status(401).json({ message: "Token d'accès manquant ou invalide" });
     }
 
     const token = authHeader.split(" ")[1];
     const payload = jwt.verify(token, JWT_ACCESS_SECRET);
 
     const user = await User.findById(payload.userId);
-    if (!user) {
-      return res.status(404).json({ message: "Utilisateur non trouvé" });
-    }
+    if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
 
     req.user = user;
     next();
@@ -153,9 +139,7 @@ const authenticate = async (req, res, next) => {
 // ===============================
 // 🔹 Routes
 // ===============================
-app.get("/", (_req, res) =>
-  res.send("🎬 Bienvenue sur l'API CineCritique 🚀")
-);
+app.get("/", (_req, res) => res.send("🎬 Bienvenue sur l'API CineCritique 🚀"));
 
 // Reviews
 app.use("/api", reviewRoutes);
@@ -164,9 +148,7 @@ app.use("/api", reviewRoutes);
 app.get("/api/profile", authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select("-passwordHash");
-    if (!user) {
-      return res.status(404).json({ message: "Utilisateur non trouvé" });
-    }
+    if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
     res.status(200).json(user);
   } catch (err) {
     console.error("Erreur lors de la récupération du profil :", err);
@@ -234,15 +216,12 @@ app.post("/api/auth/login", async (req, res) => {
   if (!user) return res.status(401).json({ message: "Identifiants invalides" });
 
   const isValid = await bcrypt.compare(password, user.passwordHash);
-  if (!isValid)
-    return res.status(401).json({ message: "Identifiants invalides" });
+  if (!isValid) return res.status(401).json({ message: "Identifiants invalides" });
 
   const { accessToken, refreshToken } = await generateTokens(user);
   setRefreshTokenCookie(res, refreshToken);
 
-  res
-    .status(200)
-    .json({ user: { id: user._id, email: user.email }, accessToken });
+  res.status(200).json({ user: { id: user._id, email: user.email }, accessToken });
 });
 
 // --- Refresh
@@ -263,14 +242,11 @@ app.post("/api/auth/refresh", async (req, res) => {
     const user = await User.findById(payload.userId);
     if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
 
-    const { accessToken, refreshToken: newRefreshToken } =
-      await generateTokens(user);
+    const { accessToken, refreshToken: newRefreshToken } = await generateTokens(user);
     await RefreshToken.deleteOne({ token: refreshToken });
     setRefreshTokenCookie(res, newRefreshToken);
 
-    res
-      .status(200)
-      .json({ user: { id: user._id, email: user.email }, accessToken });
+    res.status(200).json({ user: { id: user._id, email: user.email }, accessToken });
   } catch (err) {
     console.error("❌ Refresh error:", err);
     res.status(401).json({ message: "Refresh token invalide ou expiré" });
