@@ -14,7 +14,7 @@ dotenv.config();
 const User = require("./models/User");
 const Review = require("./models/Review");
 const RefreshToken = require("./models/RefreshToken");
-const reviewRoutes = require("./routes/reviewRoutes.js");
+const reviewRoutes = require("./routes/reviewRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,7 +28,7 @@ const FRONTEND_ORIGIN =
 // CORS
 app.use(
   cors({
-    origin: isProduction ? FRONTEND_ORIGIN : "http://localhost:5173", // ⚠️ adapte au port Vite
+    origin: isProduction ? FRONTEND_ORIGIN : ["http://localhost:5173", "http://localhost:5174"], // Support des deux ports
     credentials: true,
   })
 );
