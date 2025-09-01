@@ -99,10 +99,16 @@ async function generateTokens(user) {
   const accessToken = signAccessToken({ userId: user._id, email: user.email });
   const refreshToken = signRefreshToken({ userId: user._id });
 
-  await RefreshToken.create({ userId: user._id, token: refreshToken });
+  // upsert : soit met à jour, soit crée
+  await RefreshToken.findOneAndUpdate(
+    { userId: user._id },
+    { token: refreshToken },
+    { upsert: true, new: true }
+  );
 
   return { accessToken, refreshToken };
 }
+
 
 // ===============================
 // 🔹 Connexion MongoDB
